@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { CustomerList, Customer } from "@/components/customer-list";
 import { CustomerFormDialog } from "@/components/customer-form-dialog";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { SearchBar } from "@/components/search-bar";
 import { Button } from "@/components/ui/button";
-import { Plus, Download } from "lucide-react";
+import { Plus, Download, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { exportToCSV } from "@/lib/export";
+import { parseCSV, validateRequired, validateEmail } from "@/lib/import";
 import type { InsertCustomer } from "@shared/schema";
 
 type CustomerWithStats = Customer & { totalPurchases: number; totalSpent: number };
@@ -18,6 +19,8 @@ export default function Customers() {
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [deletingCustomer, setDeletingCustomer] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const { data: customers = [], isLoading } = useQuery<CustomerWithStats[]>({
@@ -87,17 +90,83 @@ export default function Customers() {
 
   const handleExport = () => {
     exportToCSV(
-      customers,
+      customers.map(c => ({
+        name: c.name,
+        phone: c.phone,
+        email: c.email,
+      })),
       "customers",
       [
         { key: "name", label: "Name" },
         { key: "phone", label: "Phone" },
         { key: "email", label: "Email" },
-        { key: "totalPurchases", label: "Total Purchases" },
-        { key: "totalSpent", label: "Total Spent" },
       ]
     );
     toast({ title: "Customers exported successfully" });
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    try {
+      const result = await parseCSV<InsertCustomer>(
+        file,
+        [
+          { csvHeader: "Name", field: "name" },
+          { csvHeader: "Phone", field: "phone" },
+          { csvHeader: "Email", field: "email" },
+        ],
+        (row) => ({
+          name: validateRequired(row["Name"], "Name"),
+          phone: validateRequired(row["Phone"], "Phone"),
+          email: validateEmail(row["Email"], "Email"),
+        })
+      );
+
+      if (result.errors.length > 0) {
+        toast({
+          title: "Import errors",
+          description: result.errors.slice(0, 3).join(", "),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Import customers one by one
+      let successCount = 0;
+      let failCount = 0;
+      for (const customer of result.data) {
+        try {
+          await apiRequest("POST", "/api/customers", customer);
+          successCount++;
+        } catch (error) {
+          failCount++;
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      toast({
+        title: "Import complete",
+        description: `${successCount} customers imported successfully${failCount > 0 ? `, ${failCount} failed` : ""}`,
+      });
+    } catch (error) {
+      toast({
+        title: "Import failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   };
 
   const filteredCustomers = customers.filter(
@@ -119,6 +188,23 @@ export default function Customers() {
           <p className="text-muted-foreground">Manage your customer database</p>
         </div>
         <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleFileChange}
+            className="hidden"
+            data-testid="input-import-file"
+          />
+          <Button 
+            variant="outline" 
+            onClick={handleImportClick} 
+            disabled={isImporting}
+            data-testid="button-import-customers"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            {isImporting ? "Importing..." : "Import CSV"}
+          </Button>
           <Button variant="outline" onClick={handleExport} data-testid="button-export-customers">
             <Download className="mr-2 h-4 w-4" />
             Export CSV
