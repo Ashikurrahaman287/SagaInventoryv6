@@ -148,8 +148,8 @@ export default function Products() {
           stockCode: validateRequired(row["Stock Code"], "Stock Code"),
           name: validateRequired(row["Product Name"], "Product Name"),
           category: validateRequired(row["Category"], "Category"),
-          buyingPrice: validateNumber(row["Buying Price"], "Buying Price").toString(),
-          sellingPrice: validateNumber(row["Selling Price"], "Selling Price").toString(),
+          buyingPrice: validateNumber(row["Buying Price"], "Buying Price"),
+          sellingPrice: validateNumber(row["Selling Price"], "Selling Price"),
           quantity: validateInteger(row["Quantity"], "Quantity"),
           supplierId: row["Supplier ID"]?.trim() || null,
         })
@@ -166,21 +166,32 @@ export default function Products() {
 
       // Import products one by one
       let successCount = 0;
-      let failCount = 0;
-      for (const product of result.data) {
+      const failedRows: string[] = [];
+      for (let i = 0; i < result.data.length; i++) {
+        const product = result.data[i];
         try {
           await apiRequest("POST", "/api/products", product);
           successCount++;
         } catch (error) {
-          failCount++;
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          failedRows.push(`Row ${i + 2}: ${product.stockCode || 'Unknown'} - ${errorMsg}`);
         }
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({
-        title: "Import complete",
-        description: `${successCount} products imported successfully${failCount > 0 ? `, ${failCount} failed` : ""}`,
-      });
+      
+      if (failedRows.length > 0) {
+        toast({
+          title: "Import completed with errors",
+          description: `${successCount} products imported. ${failedRows.length} failed: ${failedRows.slice(0, 2).join(', ')}${failedRows.length > 2 ? '...' : ''}`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Import successful",
+          description: `${successCount} products imported successfully`,
+        });
+      }
     } catch (error) {
       toast({
         title: "Import failed",

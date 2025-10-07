@@ -135,21 +135,32 @@ export default function Suppliers() {
 
       // Import suppliers one by one
       let successCount = 0;
-      let failCount = 0;
-      for (const supplier of result.data) {
+      const failedRows: string[] = [];
+      for (let i = 0; i < result.data.length; i++) {
+        const supplier = result.data[i];
         try {
           await apiRequest("POST", "/api/suppliers", supplier);
           successCount++;
         } catch (error) {
-          failCount++;
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          failedRows.push(`Row ${i + 2}: ${supplier.name || 'Unknown'} - ${errorMsg}`);
         }
       }
 
       queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
-      toast({
-        title: "Import complete",
-        description: `${successCount} suppliers imported successfully${failCount > 0 ? `, ${failCount} failed` : ""}`,
-      });
+      
+      if (failedRows.length > 0) {
+        toast({
+          title: "Import completed with errors",
+          description: `${successCount} suppliers imported. ${failedRows.length} failed: ${failedRows.slice(0, 2).join(', ')}${failedRows.length > 2 ? '...' : ''}`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Import successful",
+          description: `${successCount} suppliers imported successfully`,
+        });
+      }
     } catch (error) {
       toast({
         title: "Import failed",

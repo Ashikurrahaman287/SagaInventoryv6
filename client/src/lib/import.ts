@@ -15,7 +15,8 @@ export function parseCSV<T>(
     
     reader.onload = (e) => {
       const text = e.target?.result as string;
-      const lines = text.split('\n').filter(line => line.trim());
+      // Handle both Windows (CRLF) and Unix (LF) line endings
+      const lines = text.split(/\r?\n/).filter(line => line.trim());
       
       if (lines.length === 0) {
         resolve({ data: [], errors: ['CSV file is empty'] });
