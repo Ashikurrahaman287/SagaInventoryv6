@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/select";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
+import { exportToCSV } from "@/lib/export";
+import { useToast } from "@/hooks/use-toast";
 
 interface StockReport {
   category: string;
@@ -97,6 +99,8 @@ function ProfitCards() {
 
 export default function Reports() {
   const [period, setPeriod] = useState("today");
+  const [activeTab, setActiveTab] = useState("stock");
+  const { toast } = useToast();
 
   const { data: stockData, isLoading: isLoadingStock } = useQuery<StockReport[]>({
     queryKey: ["/api/reports/stock"],
@@ -122,6 +126,106 @@ export default function Reports() {
     { value: 'year', label: 'This Year' },
   ];
 
+  const handleExport = () => {
+    const periodLabel = periods.find(p => p.value === period)?.label || period;
+
+    switch (activeTab) {
+      case "stock":
+        if (stockData && stockData.length > 0) {
+          exportToCSV(
+            stockData.map(s => ({
+              category: s.category,
+              products: s.products,
+              value: s.value,
+              status: s.status,
+            })),
+            `stock_report_${period}`,
+            [
+              { key: "category", label: "Category" },
+              { key: "products", label: "Products" },
+              { key: "value", label: "Value" },
+              { key: "status", label: "Status" },
+            ]
+          );
+          toast({ title: "Stock report exported successfully" });
+        } else {
+          toast({ title: "No data to export", variant: "destructive" });
+        }
+        break;
+
+      case "sales":
+        if (salesData) {
+          exportToCSV(
+            [{
+              period: periodLabel,
+              transactions: salesData.transactions,
+              revenue: salesData.revenue,
+              profit: salesData.profit,
+            }],
+            `sales_report_${period}`,
+            [
+              { key: "period", label: "Period" },
+              { key: "transactions", label: "Transactions" },
+              { key: "revenue", label: "Revenue" },
+              { key: "profit", label: "Profit" },
+            ]
+          );
+          toast({ title: "Sales report exported successfully" });
+        } else {
+          toast({ title: "No data to export", variant: "destructive" });
+        }
+        break;
+
+      case "profit":
+        const profitExportData = [];
+        if (salesData) {
+          profitExportData.push({
+            period: periodLabel,
+            transactions: salesData.transactions,
+            revenue: salesData.revenue,
+            profit: salesData.profit,
+          });
+        }
+        if (profitExportData.length > 0) {
+          exportToCSV(
+            profitExportData,
+            `profit_report_${period}`,
+            [
+              { key: "period", label: "Period" },
+              { key: "transactions", label: "Transactions" },
+              { key: "revenue", label: "Revenue" },
+              { key: "profit", label: "Profit" },
+            ]
+          );
+          toast({ title: "Profit report exported successfully" });
+        } else {
+          toast({ title: "No data to export", variant: "destructive" });
+        }
+        break;
+
+      case "customers":
+        if (topCustomers && topCustomers.length > 0) {
+          exportToCSV(
+            topCustomers.map(c => ({
+              name: c.name,
+              purchases: c.purchases,
+              spent: c.spent,
+            })),
+            `customer_report_${period}`,
+            [
+              { key: "name", label: "Customer Name" },
+              { key: "purchases", label: "Purchases" },
+              { key: "spent", label: "Total Spent" },
+            ]
+          );
+          toast({ title: "Customer report exported successfully" });
+        } else {
+          toast({ title: "No data to export", variant: "destructive" });
+        }
+        break;
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -144,14 +248,14 @@ export default function Reports() {
               <SelectItem value="year">This Year</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" data-testid="button-export">
+          <Button variant="outline" onClick={handleExport} data-testid="button-export">
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
         </div>
       </div>
 
-      <Tabs defaultValue="stock" className="space-y-6">
+      <Tabs defaultValue="stock" value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList>
           <TabsTrigger value="stock" data-testid="tab-stock">
             Stock Report
