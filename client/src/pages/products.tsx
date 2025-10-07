@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ProductTable } from "@/components/product-table";
 import { ProductFormDialog } from "@/components/product-form-dialog";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { SearchBar } from "@/components/search-bar";
 import { Button } from "@/components/ui/button";
-import { Plus, Download } from "lucide-react";
+import { Plus, Download, Upload } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -16,6 +16,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { exportToCSV } from "@/lib/export";
+import { parseCSV, validateRequired, validateNumber, validateInteger } from "@/lib/import";
 import type { InsertProduct, Supplier, Product } from "@shared/schema";
 
 export default function Products() {
@@ -24,6 +25,8 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deletingProduct, setDeletingProduct] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
@@ -104,6 +107,7 @@ export default function Products() {
         buyingPrice: p.buyingPrice,
         sellingPrice: p.sellingPrice,
         quantity: p.quantity,
+        supplierId: p.supplierId || "",
       })),
       "products",
       [
@@ -113,9 +117,82 @@ export default function Products() {
         { key: "buyingPrice", label: "Buying Price" },
         { key: "sellingPrice", label: "Selling Price" },
         { key: "quantity", label: "Quantity" },
+        { key: "supplierId", label: "Supplier ID" },
       ]
     );
     toast({ title: "Products exported successfully" });
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    try {
+      const result = await parseCSV<InsertProduct>(
+        file,
+        [
+          { csvHeader: "Stock Code", field: "stockCode" },
+          { csvHeader: "Product Name", field: "name" },
+          { csvHeader: "Category", field: "category" },
+          { csvHeader: "Buying Price", field: "buyingPrice" },
+          { csvHeader: "Selling Price", field: "sellingPrice" },
+          { csvHeader: "Quantity", field: "quantity" },
+          { csvHeader: "Supplier ID", field: "supplierId" },
+        ],
+        (row) => ({
+          stockCode: validateRequired(row["Stock Code"], "Stock Code"),
+          name: validateRequired(row["Product Name"], "Product Name"),
+          category: validateRequired(row["Category"], "Category"),
+          buyingPrice: validateNumber(row["Buying Price"], "Buying Price").toString(),
+          sellingPrice: validateNumber(row["Selling Price"], "Selling Price").toString(),
+          quantity: validateInteger(row["Quantity"], "Quantity"),
+          supplierId: row["Supplier ID"]?.trim() || null,
+        })
+      );
+
+      if (result.errors.length > 0) {
+        toast({
+          title: "Import errors",
+          description: result.errors.slice(0, 3).join(", "),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Import products one by one
+      let successCount = 0;
+      let failCount = 0;
+      for (const product of result.data) {
+        try {
+          await apiRequest("POST", "/api/products", product);
+          successCount++;
+        } catch (error) {
+          failCount++;
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      toast({
+        title: "Import complete",
+        description: `${successCount} products imported successfully${failCount > 0 ? `, ${failCount} failed` : ""}`,
+      });
+    } catch (error) {
+      toast({
+        title: "Import failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   };
 
   const filteredProducts = products.filter((product) => {
@@ -140,6 +217,23 @@ export default function Products() {
           <p className="text-muted-foreground">Manage your product inventory</p>
         </div>
         <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleFileChange}
+            className="hidden"
+            data-testid="input-import-file"
+          />
+          <Button 
+            variant="outline" 
+            onClick={handleImportClick} 
+            disabled={isImporting}
+            data-testid="button-import-products"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            {isImporting ? "Importing..." : "Import CSV"}
+          </Button>
           <Button variant="outline" onClick={handleExport} data-testid="button-export-products">
             <Download className="mr-2 h-4 w-4" />
             Export CSV
