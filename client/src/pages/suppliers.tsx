@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SupplierFormDialog } from "@/components/supplier-form-dialog";
@@ -6,10 +6,11 @@ import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { SearchBar } from "@/components/search-bar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Mail, Phone, Package, Download, Edit, Trash2 } from "lucide-react";
+import { Plus, Mail, Phone, Package, Download, Upload, Edit, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { exportToCSV } from "@/lib/export";
+import { parseCSV, validateRequired, validateEmail } from "@/lib/import";
 import type { Supplier, InsertSupplier } from "@shared/schema";
 
 export default function Suppliers() {
@@ -17,6 +18,8 @@ export default function Suppliers() {
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [deletingSupplier, setDeletingSupplier] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const { data: suppliers = [], isLoading } = useQuery<Supplier[]>({
@@ -82,7 +85,11 @@ export default function Suppliers() {
 
   const handleExport = () => {
     exportToCSV(
-      suppliers,
+      suppliers.map(s => ({
+        name: s.name,
+        phone: s.phone,
+        email: s.email,
+      })),
       "suppliers",
       [
         { key: "name", label: "Name" },
@@ -91,6 +98,70 @@ export default function Suppliers() {
       ]
     );
     toast({ title: "Suppliers exported successfully" });
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    try {
+      const result = await parseCSV<InsertSupplier>(
+        file,
+        [
+          { csvHeader: "Name", field: "name" },
+          { csvHeader: "Phone", field: "phone" },
+          { csvHeader: "Email", field: "email" },
+        ],
+        (row) => ({
+          name: validateRequired(row["Name"], "Name"),
+          phone: validateRequired(row["Phone"], "Phone"),
+          email: validateEmail(row["Email"], "Email"),
+        })
+      );
+
+      if (result.errors.length > 0) {
+        toast({
+          title: "Import errors",
+          description: result.errors.slice(0, 3).join(", "),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Import suppliers one by one
+      let successCount = 0;
+      let failCount = 0;
+      for (const supplier of result.data) {
+        try {
+          await apiRequest("POST", "/api/suppliers", supplier);
+          successCount++;
+        } catch (error) {
+          failCount++;
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({
+        title: "Import complete",
+        description: `${successCount} suppliers imported successfully${failCount > 0 ? `, ${failCount} failed` : ""}`,
+      });
+    } catch (error) {
+      toast({
+        title: "Import failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   };
 
   const filteredSuppliers = suppliers.filter(
@@ -112,6 +183,23 @@ export default function Suppliers() {
           <p className="text-muted-foreground">Manage your supplier relationships</p>
         </div>
         <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleFileChange}
+            className="hidden"
+            data-testid="input-import-file"
+          />
+          <Button 
+            variant="outline" 
+            onClick={handleImportClick} 
+            disabled={isImporting}
+            data-testid="button-import-suppliers"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            {isImporting ? "Importing..." : "Import CSV"}
+          </Button>
           <Button variant="outline" onClick={handleExport} data-testid="button-export-suppliers">
             <Download className="mr-2 h-4 w-4" />
             Export CSV
