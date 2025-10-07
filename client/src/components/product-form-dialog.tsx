@@ -51,7 +51,7 @@ export function ProductFormDialog({
       buyingPrice: "0",
       sellingPrice: "0",
       quantity: 0,
-      supplierId: "",
+      supplierId: undefined,
     },
   });
 
@@ -64,7 +64,7 @@ export function ProductFormDialog({
         buyingPrice: product.buyingPrice,
         sellingPrice: product.sellingPrice,
         quantity: product.quantity,
-        supplierId: product.supplierId || "",
+        supplierId: product.supplierId || undefined,
       });
     } else {
       form.reset({
@@ -74,7 +74,7 @@ export function ProductFormDialog({
         buyingPrice: "0",
         sellingPrice: "0",
         quantity: 0,
-        supplierId: "",
+        supplierId: undefined,
       });
     }
   }, [product, form]);
@@ -82,7 +82,7 @@ export function ProductFormDialog({
   const handleSubmit = async (data: InsertProduct) => {
     const submissionData = {
       ...data,
-      supplierId: data.supplierId || null,
+      supplierId: data.supplierId && data.supplierId.trim() !== "" ? data.supplierId : null,
     };
     await onSubmit(submissionData);
     onOpenChange(false);
@@ -212,13 +212,18 @@ export function ProductFormDialog({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Supplier (Optional)</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value || undefined} disabled={suppliers.length === 0}>
+                  <Select 
+                    onValueChange={(value) => field.onChange(value === "none" ? undefined : value)} 
+                    value={field.value || "none"} 
+                    disabled={suppliers.length === 0}
+                  >
                     <FormControl>
                       <SelectTrigger data-testid="select-supplier">
                         <SelectValue placeholder={suppliers.length === 0 ? "No suppliers available" : "Select a supplier (optional)"} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
+                      <SelectItem value="none">No Supplier</SelectItem>
                       {suppliers.map((supplier) => (
                         <SelectItem key={supplier.id} value={supplier.id}>
                           {supplier.name}

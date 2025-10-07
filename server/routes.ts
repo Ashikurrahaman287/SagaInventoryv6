@@ -210,23 +210,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/products", async (req, res) => {
     try {
-      const data = insertProductSchema.parse(req.body);
+      // Normalize supplierId: convert empty strings to null
+      const normalizedBody = {
+        ...req.body,
+        supplierId: req.body.supplierId && req.body.supplierId.trim() !== "" ? req.body.supplierId : null,
+      };
+      
+      const data = insertProductSchema.parse(normalizedBody);
+      
+      // Check for duplicate stock code
+      if (data.stockCode) {
+        const existingProduct = await storage.getProductByStockCode(data.stockCode);
+        if (existingProduct) {
+          return res.status(409).json({ error: "A product with this stock code already exists" });
+        }
+      }
+      
       const product = await storage.createProduct(data);
       res.status(201).json(product);
     } catch (error: any) {
+      // Handle database constraint violations
+      if (error.code === '23505') {
+        return res.status(409).json({ error: "A product with this stock code already exists" });
+      }
+      if (error.code === '23503') {
+        return res.status(400).json({ error: "Invalid supplier selected" });
+      }
       res.status(400).json({ error: error.message });
     }
   });
 
   app.patch("/api/products/:id", async (req, res) => {
     try {
-      const data = insertProductSchema.partial().parse(req.body);
+      // Normalize supplierId: convert empty strings to null
+      const normalizedBody = {
+        ...req.body,
+        supplierId: req.body.supplierId !== undefined && req.body.supplierId !== null && req.body.supplierId.trim() !== "" 
+          ? req.body.supplierId 
+          : null,
+      };
+      
+      const data = insertProductSchema.partial().parse(normalizedBody);
+      
+      // Check for duplicate stock code when updating
+      if (data.stockCode) {
+        const existingProduct = await storage.getProductByStockCode(data.stockCode);
+        if (existingProduct && existingProduct.id !== req.params.id) {
+          return res.status(409).json({ error: "A product with this stock code already exists" });
+        }
+      }
+      
       const product = await storage.updateProduct(req.params.id, data);
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
       res.json(product);
     } catch (error: any) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: "A product with this stock code already exists" });
+      }
+      if (error.code === '23503') {
+        return res.status(400).json({ error: "Invalid supplier selected" });
+      }
       res.status(400).json({ error: error.message });
     }
   });
@@ -272,6 +317,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await storage.createSale(data);
       res.status(201).json(result);
     } catch (error: any) {
+      // Handle database constraint violations
+      if (error.code === '23503') {
+        return res.status(400).json({ error: "Invalid customer, seller, or product selected" });
+      }
       res.status(400).json({ error: error.message });
     }
   });
